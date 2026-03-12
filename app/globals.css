@@ -1,26 +1,165 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Easing curves */
+  --ease:        cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);        /* fast out, smooth settle */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);    /* slight overshoot spring */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);       /* symmetric, deliberate */
+
+  /* Durations */
+  --dur-fast:  0.14s;
+  --dur-med:   0.24s;
+  --dur-slow:  0.38s;
+
+  /* Backgrounds */
+  --bg:        #fafaf9;
+  --bg-sub:    #f4f4f2;
+  --bg-card:   #ffffff;
+
+  /* Foregrounds */
+  --fg:        #0d0d0d;
+  --fg-muted:  #666;
+  --fg-dim:    #999;
+  --fg-xdim:   #bbb;
+
+  /* Borders */
+  --border:    #e8e8e4;
+  --border-2:  #eeecea;
+
+  /* Semantic — kept ONLY for financial data (profit/loss) */
+  --green:     #16a34a;
+  --green-bg:  #f0fdf4;
+  --green-bd:  #bbf7d0;
+  --red:       #dc2626;
+  --red-bg:    #fef2f2;
+  --red-bd:    #fecaca;
+  --amber:     #d97706;
+  --amber-bg:  #fffbeb;
+  --amber-bd:  #fde68a;
+
+  /* Nav active state — neutral gray, no color accent */
+  --nav-active-bg:   rgba(0,0,0,0.055);
+  --nav-hover-bg:    rgba(0,0,0,0.03);
+  --nav-active-text: #0d0d0d;
+
+  /* Components */
+  --card-hover:  #f7f7f5;
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:   0 4px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.05);
+
+  /* Legacy aliases */
+  --card-bg:    #ffffff;
+  --sidebar-bg: #f4f4f2;
+  --muted:      #666;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+[data-theme="dark"] {
+  --bg:        #111110;
+  --bg-sub:    #191918;
+  --bg-card:   #1c1c1b;
+  --fg:        #fffffd;
+  --fg-muted:  #7f7f7c;
+  --fg-dim:    #4a4a48;
+  --fg-xdim:   #2e2e2c;
+  --border:    #272725;
+  --border-2:  #202020;
+  --green:     #4ade80;
+  --green-bg:  #0d2010;
+  --green-bd:  #1e4020;
+  --red:       #f87171;
+  --red-bg:    #200d0d;
+  --red-bd:    #401e1e;
+  --amber:     #fbbf24;
+  --amber-bg:  #201a0d;
+  --amber-bd:  #40320a;
+  --nav-active-bg:   rgba(255,255,255,0.07);
+  --nav-hover-bg:    rgba(255,255,255,0.04);
+  --nav-active-text: #fffffd;
+  --card-hover: #181817;
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.4);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Legacy aliases */
+  --card-bg:    #1c1c1b;
+  --sidebar-bg: #191918;
+  --muted:      #7f7f7c;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s var(--ease), color 0.2s var(--ease);
 }
+
+* { box-sizing: border-box; }
+
+/* ── Page transition ─────────────────────────────────────────── */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(10px); filter: blur(3px); }
+  to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+.page-enter {
+  animation: pageIn var(--dur-slow) var(--ease-out) both;
+}
+
+/* ── Modal / sheet ───────────────────────────────────────────── */
+@keyframes modalBackdropIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modalBackdropOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.985); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);     filter: blur(0); }
+}
+@keyframes modalSlideDown {
+  from { opacity: 1; transform: translateY(0)    scale(1); }
+  to   { opacity: 0; transform: translateY(16px) scale(0.99); }
+}
+.modal-backdrop {
+  animation: modalBackdropIn var(--dur-med) var(--ease-out) both;
+}
+.modal-card {
+  animation: modalSlideUp var(--dur-slow) var(--ease-out) both;
+}
+
+/* ── Widget fade-in (staggered) ──────────────────────────────── */
+@keyframes widgetIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.widget-enter {
+  animation: widgetIn var(--dur-slow) var(--ease-out) both;
+}
+
+/* ── Nav active pill ─────────────────────────────────────────── */
+@keyframes navPillIn {
+  from { opacity: 0; transform: scaleX(0.6); }
+  to   { opacity: 1; transform: scaleX(1); }
+}
+
+/* ── Button press ────────────────────────────────────────────── */
+.btn-press {
+  transition: transform var(--dur-fast) var(--ease-spring),
+              opacity  var(--dur-fast) var(--ease);
+}
+.btn-press:active {
+  transform: scale(0.96);
+  opacity: 0.85;
+}
+
+/* ── Spinner ─────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Pulse skeleton ──────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+.animate-pulse { animation: pulse 1.6s var(--ease-in-out) infinite; }

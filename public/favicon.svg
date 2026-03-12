@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- Thick calligraphic left leg -->
+  <path d="M52 9 L11 86" stroke="white" stroke-width="12" stroke-linecap="round"/>
+  <!-- Thin right leg -->
+  <path d="M52 9 L80 78" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <!-- Inner body stroke -->
+  <path d="M52 9 L28 70" stroke="white" stroke-width="2.2" stroke-linecap="round" opacity="0.52"/>
+  <!-- Neural connector arcs -->
+  <path d="M52,9 C24,20 14,40 30,55" stroke="white" stroke-width="1.1" stroke-linecap="round" opacity="0.34"/>
+  <path d="M30,55 C52,64 66,70 80,78" stroke="white" stroke-width="1.1" stroke-linecap="round" opacity="0.34"/>
+  <!-- Nodes -->
+  <circle cx="52" cy="9"  r="4.5" fill="white"/>
+  <circle cx="30" cy="55" r="3"   fill="white"/>
+  <circle cx="80" cy="78" r="3.8" fill="white"/>
+</svg>
