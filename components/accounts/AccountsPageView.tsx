@@ -5,7 +5,9 @@ import { Plus, Wallet, ChevronDown, ChevronUp } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { Account, AccountStatus } from '@/types'
 import AccountCard, { calcTotalInvested } from './AccountCard'
+import AccountGridCard from './AccountGridCard'
 import AccountForm from './AccountForm'
+import AccountComparison from './AccountComparison'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { deleteAccount } from '@/lib/firestore/accounts'
 
@@ -22,6 +24,7 @@ const STATUS_BADGE: Record<AccountStatus, { bg: string; color: string; border: s
   Paused:    { bg: 'var(--amber-bg)',  color: 'var(--amber)',    border: 'var(--amber-bd)' },
   Withdrawn: { bg: 'var(--bg-sub)',    color: 'var(--fg-muted)', border: 'var(--border)'   },
 }
+
 const TYPE_BADGE = {
   funded:     { bg: 'var(--green-bg)',  color: 'var(--green)',    border: 'var(--green-bd)' },
   evaluation: { bg: 'var(--amber-bg)',  color: 'var(--amber)',    border: 'var(--amber-bd)' },
@@ -29,11 +32,13 @@ const TYPE_BADGE = {
 }
 
 export default function AccountsPageView({ accounts, uid, onAccountsChange }: Props) {
-  const [showModal,    setShowModal]    = useState(false)
-  const [editing,      setEditing]      = useState<Account | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
-  const [deleting,     setDeleting]     = useState(false)
-  const [historyOpen,  setHistoryOpen]  = useState(true)
+  const [showModal,      setShowModal]      = useState(false)
+  const [editing,        setEditing]        = useState<Account | null>(null)
+  const [deleteTarget,   setDeleteTarget]   = useState<string | null>(null)
+  const [deleting,       setDeleting]       = useState(false)
+  const [historyOpen,    setHistoryOpen]    = useState(true)
+  const [compareMode,    setCompareMode]    = useState(false)
+  const [viewMode,       setViewMode]       = useState<'grid' | 'list'>('grid')
 
   const handleSave = (account: Account) => {
     const exists = accounts.find(a => a.id === account.id)
@@ -68,7 +73,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
 
   const active = accounts.filter(a => !a.status || a.status === 'Active')
 
-  // ── Portfolio aggregates ────────────────────────────────────────────────────
+  // ── Portfolio aggregates ─────────────────────────────────────────────────────
   const totalInvested = useMemo(() =>
     accounts.reduce((s, a) => s + calcTotalInvested(a), 0), [accounts])
 
@@ -79,7 +84,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
   const bePercent  = totalInvested > 0 ? Math.min(100, (totalPayouts / totalInvested) * 100) : 0
   const houseMoney = totalInvested > 0 && totalPayouts >= totalInvested
 
-  // ── Broker exposure (only when 2+ active accounts share a broker) ───────────
+  // ── Broker exposure ──────────────────────────────────────────────────────────
   const brokerGroups = useMemo(() => {
     const map = new Map<string, { display: string; count: number; capital: number }>()
     for (const a of active) {
@@ -101,67 +106,90 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
     : 'var(--red)'
 
   return (
-    <div style={{ maxWidth: 760 }}>
+    <div style={{ maxWidth: 860 }}>
 
-      {/* ── Page header ─────────────────────────────────────── */}
+      {/* ── Page header ──────────────────────────────────────────── */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 24, gap: 12, flexWrap: 'wrap',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        marginBottom: 28, gap: 12, flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            width: 34, height: 34, borderRadius: 10,
+            width: 36, height: 36, borderRadius: 10,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'var(--bg-sub)', border: '1px solid var(--border)', flexShrink: 0,
           }}>
-            <Wallet size={15} style={{ color: 'var(--fg-muted)' }} />
+            <Wallet size={16} style={{ color: 'var(--fg-muted)' }} />
           </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: '1.1875rem', fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.04em' }}>
+            <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.04em' }}>
               Accounts
             </h1>
-            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg-muted)' }}>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
               {accounts.length === 0
-                ? 'No accounts yet'
+                ? 'Every account is a different trading environment.'
                 : `${active.length} active · ${accounts.length} total`}
             </p>
           </div>
         </div>
-        <AddAccountButton onClick={() => { setEditing(null); setShowModal(true) }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* View toggle */}
+          {accounts.length > 0 && (
+            <>
+              <button
+                onClick={() => setCompareMode(c => !c)}
+                style={{
+                  padding: '7px 14px', borderRadius: 8,
+                  background: compareMode ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  border: `1px solid ${compareMode ? 'rgba(255,255,255,0.18)' : 'var(--border)'}`,
+                  color: compareMode ? 'var(--fg)' : 'var(--fg-muted)',
+                  fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer',
+                  fontFamily: 'inherit', letterSpacing: '-0.01em',
+                  transition: 'all 0.12s',
+                }}
+              >
+                Compare
+              </button>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </>
+          )}
+          <AddAccountButton onClick={() => { setEditing(null); setShowModal(true) }} />
+        </div>
       </div>
 
-      {/* ── Portfolio card ──────────────────────────────────── */}
+      {/* ── Portfolio card ────────────────────────────────────────── */}
       {accounts.length > 0 && (
         <div style={{
           background: 'var(--bg-card)',
           border: `1px solid ${houseMoney ? 'rgba(74,222,128,0.22)' : 'var(--border)'}`,
-          borderRadius: 14, overflow: 'hidden', marginBottom: 20,
+          borderRadius: 14, overflow: 'hidden', marginBottom: 28,
           boxShadow: houseMoney ? '0 0 0 1px rgba(74,222,128,0.06)' : 'none',
         }}>
 
           {/* Stats strip */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
             {[
-              { label: 'Invested',  value: totalInvested > 0 ? `$${totalInvested.toLocaleString()}` : '—', color: '#fbbf24' },
-              { label: 'Payouts',   value: totalPayouts  > 0 ? `$${totalPayouts.toLocaleString()}`  : '—', color: '#4ade80' },
+              { label: 'Total Invested', value: totalInvested > 0 ? `$${totalInvested.toLocaleString()}` : '—', color: '#fbbf24' },
+              { label: 'Total Payouts',  value: totalPayouts  > 0 ? `$${totalPayouts.toLocaleString()}`  : '—', color: '#4ade80' },
               {
-                label: 'Net',
+                label: 'Net P&L',
                 value: totalInvested > 0 ? `${net >= 0 ? '+' : ''}$${net.toLocaleString()}` : '—',
                 color: net >= 0 ? '#4ade80' : 'var(--red)',
               },
-              { label: 'Accounts',  value: String(accounts.length), color: 'var(--fg-muted)' },
+              { label: 'Accounts', value: String(accounts.length), color: 'var(--fg-muted)' },
             ].map((s, i) => (
               <div key={s.label} style={{
-                padding: '14px 16px',
+                padding: '16px 18px',
                 borderRight: i < 3 ? '1px solid var(--border)' : 'none',
               }}>
                 <p style={{
                   margin: 0, fontSize: '0.5625rem', color: 'var(--fg-xdim)',
-                  textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 4,
+                  textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, marginBottom: 5,
                 }}>
                   {s.label}
                 </p>
-                <p style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: s.color, letterSpacing: '-0.03em' }}>
+                <p style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>
                   {s.value}
                 </p>
               </div>
@@ -188,9 +216,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
                       textTransform: 'uppercase', padding: '2px 8px', borderRadius: 99,
                       background: 'rgba(74,222,128,0.12)', color: '#4ade80',
                       border: '1px solid rgba(74,222,128,0.25)',
-                    }}>
-                      House Money
-                    </span>
+                    }}>House Money</span>
                   ) : (
                     <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--fg-muted)' }}>
                       {bePercent.toFixed(1)}%
@@ -201,8 +227,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
               <div style={{ height: 5, borderRadius: 99, background: 'var(--border)', overflow: 'hidden' }}>
                 <div style={{
                   height: '100%', borderRadius: 99, width: `${bePercent}%`,
-                  background: beBarColor,
-                  transition: 'width 0.8s cubic-bezier(0.4,0,0.2,1)',
+                  background: beBarColor, transition: 'width 0.8s cubic-bezier(0.4,0,0.2,1)',
                 }} />
               </div>
             </div>
@@ -210,26 +235,13 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
 
           {/* Broker exposure chips */}
           {brokerGroups.length > 0 && (
-            <div style={{
-              padding: '10px 18px 14px',
-              borderTop: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-            }}>
-              <span style={{
-                fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.08em',
-                textTransform: 'uppercase', color: 'var(--fg-xdim)', flexShrink: 0,
-              }}>
+            <div style={{ padding: '10px 18px 14px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-xdim)', flexShrink: 0 }}>
                 Exposure
               </span>
               {brokerGroups.map(g => (
-                <div key={g.display} style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '4px 10px', borderRadius: 99,
-                  background: 'var(--bg-sub)', border: '1px solid var(--border)',
-                }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
-                    {g.display}
-                  </span>
+                <div key={g.display} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 99, background: 'var(--bg-sub)', border: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--fg)', letterSpacing: '-0.01em' }}>{g.display}</span>
                   <span style={{ fontSize: '0.6875rem', color: 'var(--fg-dim)' }}>×{g.count}</span>
                   <span style={{ width: 1, height: 10, background: 'var(--border)', display: 'inline-block' }} />
                   <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
@@ -242,34 +254,56 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
         </div>
       )}
 
-      {/* ── Empty state ─────────────────────────────────────── */}
+      {/* ── Compare panel ────────────────────────────────────────── */}
+      {compareMode && accounts.length >= 2 && (
+        <div style={{ marginBottom: 28 }}>
+          <AccountComparison accounts={accounts} />
+        </div>
+      )}
+
+      {/* ── Empty state ──────────────────────────────────────────── */}
       {accounts.length === 0 && (
         <EmptyState onAdd={() => setShowModal(true)} />
       )}
 
-      {/* ── Active account cards ─────────────────────────────── */}
+      {/* ── Active accounts ──────────────────────────────────────── */}
       {active.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 28 }}>
-          {active.map(acc => (
-            <AccountCard
-              key={acc.id}
-              account={acc}
-              onEdit={handleEdit}
-              onDelete={id => setDeleteTarget(id)}
-              onUpdated={handleUpdated}
-            />
-          ))}
-        </div>
+        <>
+          <SectionLabel text="Active" count={active.length} />
+
+          {viewMode === 'grid' ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: 14, marginBottom: 32,
+            }}>
+              {active.map(acc => (
+                <AccountGridCard
+                  key={acc.id}
+                  account={acc}
+                  healthScore={acc.healthScore ?? null}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
+              {active.map(acc => (
+                <AccountCard
+                  key={acc.id}
+                  account={acc}
+                  onEdit={handleEdit}
+                  onDelete={id => setDeleteTarget(id)}
+                  onUpdated={handleUpdated}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      {/* ── All accounts ledger ──────────────────────────────── */}
+      {/* ── All Accounts ledger ──────────────────────────────────── */}
       {accounts.length > 0 && (
-        <div style={{
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 14,
-          overflow: 'hidden',
-        }}>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
           <button
             onClick={() => setHistoryOpen(o => !o)}
             style={{
@@ -282,10 +316,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-sub)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           >
-            <span style={{
-              fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.08em',
-              textTransform: 'uppercase', color: 'var(--fg-dim)', flex: 1, textAlign: 'left',
-            }}>
+            <span style={{ fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-dim)', flex: 1, textAlign: 'left' }}>
               All Accounts
             </span>
             <span style={{ fontSize: '0.6875rem', color: 'var(--fg-muted)', marginRight: 6 }}>
@@ -314,7 +345,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
         </div>
       )}
 
-      {/* ── Modals ──────────────────────────────────────────── */}
+      {/* ── Modals ───────────────────────────────────────────────── */}
       {showModal && (
         <AccountForm
           account={editing}
@@ -338,14 +369,41 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
   )
 }
 
+// ── Section label ─────────────────────────────────────────────────────────────
+function SectionLabel({ text, count }: { text: string; count: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <span style={{ fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--fg-dim)' }}>
+        {text}
+      </span>
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      <span style={{ fontSize: '0.625rem', color: 'var(--fg-xdim)', fontWeight: 600 }}>{count}</span>
+    </div>
+  )
+}
+
+// ── View toggle ───────────────────────────────────────────────────────────────
+function ViewToggle({ mode, onChange }: { mode: 'grid' | 'list'; onChange: (m: 'grid' | 'list') => void }) {
+  return (
+    <div style={{ display: 'flex', background: 'var(--bg-sub)', borderRadius: 8, border: '1px solid var(--border)', padding: 2, gap: 2 }}>
+      {(['grid', 'list'] as const).map(m => (
+        <button key={m} onClick={() => onChange(m)} style={{
+          padding: '5px 10px', borderRadius: 6, fontSize: '0.6875rem', fontWeight: 500,
+          background: mode === m ? 'var(--bg-card)' : 'transparent',
+          border: `1px solid ${mode === m ? 'var(--border)' : 'transparent'}`,
+          color: mode === m ? 'var(--fg)' : 'var(--fg-muted)',
+          cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s',
+          letterSpacing: '-0.01em', textTransform: 'capitalize',
+        }}>
+          {m}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ── History row ───────────────────────────────────────────────────────────────
-function AccountHistoryRow({
-  account, isLast, onEdit,
-}: {
-  account: Account
-  isLast:  boolean
-  onEdit:  () => void
-}) {
+function AccountHistoryRow({ account, isLast, onEdit }: { account: Account; isLast: boolean; onEdit: () => void }) {
   const [hov, setHov] = useState(false)
 
   const status      = (account.status ?? 'Active') as AccountStatus
@@ -385,52 +443,22 @@ function AccountHistoryRow({
         opacity: rowOpacity,
       }}
     >
-      {/* Status dot */}
-      <div style={{
-        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-        background: sBadge.color,
-        boxShadow: status === 'Active' ? `0 0 6px ${sBadge.color}80` : 'none',
-      }} />
-
-      {/* Name + meta */}
+      <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: sBadge.color, boxShadow: status === 'Active' ? `0 0 6px ${sBadge.color}80` : 'none' }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{
-          margin: 0, fontSize: '0.8125rem', fontWeight: 500,
-          color: 'var(--fg)', letterSpacing: '-0.02em',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
+        <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, color: 'var(--fg)', letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {account.name}
         </p>
         <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
-          {account.broker && `${account.broker} · `}{dateStr}
-          {account.phase && ` · ${account.phase}`}
+          {account.broker && `${account.broker} · `}{dateStr}{account.phase && ` · ${account.phase}`}
         </p>
       </div>
-
-      {/* Type badge */}
-      <span style={{
-        fontSize: '0.5625rem', fontWeight: 700, letterSpacing: '0.06em',
-        textTransform: 'uppercase', padding: '2px 6px', borderRadius: 99, flexShrink: 0,
-        background: tBadge.bg, color: tBadge.color, border: `1px solid ${tBadge.border}`,
-      }}>
+      <span style={{ fontSize: '0.5625rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 99, flexShrink: 0, background: tBadge.bg, color: tBadge.color, border: `1px solid ${tBadge.border}` }}>
         {account.type}
       </span>
-
-      {/* Status badge */}
-      <span style={{
-        fontSize: '0.5625rem', fontWeight: 700, letterSpacing: '0.06em',
-        textTransform: 'uppercase', padding: '2px 6px', borderRadius: 99, flexShrink: 0,
-        background: sBadge.bg, color: sBadge.color, border: `1px solid ${sBadge.border}`,
-      }}>
+      <span style={{ fontSize: '0.5625rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 99, flexShrink: 0, background: sBadge.bg, color: sBadge.color, border: `1px solid ${sBadge.border}` }}>
         {status}
       </span>
-
-      {/* Net P&L */}
-      <span style={{
-        fontSize: '0.8125rem', fontWeight: 600, letterSpacing: '-0.02em',
-        color: netColor, textDecoration: netDecoration,
-        flexShrink: 0, minWidth: 56, textAlign: 'right',
-      }}>
+      <span style={{ fontSize: '0.8125rem', fontWeight: 600, letterSpacing: '-0.02em', color: netColor, textDecoration: netDecoration, flexShrink: 0, minWidth: 56, textAlign: 'right' }}>
         {invested === 0 ? '—' : `${net >= 0 ? '+' : ''}$${net.toLocaleString()}`}
       </span>
     </div>
@@ -463,10 +491,7 @@ function AddAccountButton({ onClick }: { onClick: () => void }) {
         letterSpacing: '-0.02em',
       }}
     >
-      <Plus size={14} style={{
-        transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1)',
-        transform: hov ? 'rotate(90deg)' : 'rotate(0deg)',
-      }} />
+      <Plus size={14} style={{ transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1)', transform: hov ? 'rotate(90deg)' : 'rotate(0deg)' }} />
       New Account
     </button>
   )
@@ -479,40 +504,23 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      padding: '64px 24px', borderRadius: 16,
+      padding: '72px 24px', borderRadius: 16,
       background: 'var(--bg-card)', border: '1px dashed var(--border)',
-      textAlign: 'center', gap: 16,
+      textAlign: 'center', gap: 20,
     }}>
-      <div style={{
-        width: 48, height: 48, borderRadius: 14,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg-sub)', border: '1px solid var(--border)',
-      }}>
-        <Wallet size={20} style={{ color: 'var(--fg-muted)' }} />
+      <div style={{ width: 52, height: 52, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-sub)', border: '1px solid var(--border)' }}>
+        <Wallet size={22} style={{ color: 'var(--fg-muted)' }} />
       </div>
       <div>
-        <p style={{ margin: '0 0 4px', fontSize: '0.9375rem', fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.02em' }}>
+        <p style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.03em' }}>
           No accounts yet
         </p>
-        <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
-          Add your first trading account to start tracking investments and payouts
+        <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)', maxWidth: 320, lineHeight: 1.5 }}>
+          Every account is a different trading environment. Different environments reveal different behaviors.
         </p>
       </div>
-      <button
-        onClick={onAdd}
-        onMouseEnter={() => setHov(true)}
-        onMouseLeave={() => setHov(false)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '10px 22px', borderRadius: 9999,
-          background: hov ? 'var(--fg)' : 'var(--bg-sub)',
-          border: '1px solid var(--border)',
-          color: hov ? 'var(--bg)' : 'var(--fg)',
-          fontSize: '0.875rem', fontWeight: 600,
-          cursor: 'pointer', fontFamily: 'inherit',
-          transition: 'background 0.18s, color 0.18s',
-        }}
-      >
+      <button onClick={onAdd} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 24px', borderRadius: 9999, background: hov ? 'var(--fg)' : 'var(--bg-sub)', border: '1px solid var(--border)', color: hov ? 'var(--bg)' : 'var(--fg)', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.18s, color 0.18s' }}>
         <Plus size={15} />
         Add Account
       </button>

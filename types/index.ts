@@ -1,5 +1,49 @@
 export type AccountType = 'evaluation' | 'funded' | 'personal'
 
+// ── Extended account dimension types ─────────────────────────────────────────
+export type AccountEnvironment =
+  | 'live'
+  | 'demo'
+  | 'prop_firm'
+  | 'strategy_testing'
+  | 'development'
+  | 'institutional'
+
+export type MarketType = 'forex' | 'crypto' | 'stocks' | 'futures' | 'options' | 'mixed'
+
+export type TradingStyle = 'scalping' | 'intraday' | 'swing' | 'position'
+
+export type RiskModel = 'fixed' | 'variable' | 'percentage' | 'discretionary'
+
+export type AvgDuration = 'minutes' | 'hours' | 'days' | 'weeks'
+
+export interface AccountHealthBreakdown {
+  consistency:       number   // 0–100
+  drawdownControl:   number   // 0–100
+  riskDiscipline:    number   // 0–100
+  strategyAdherence: number   // 0–100
+}
+
+export interface AccountMetrics {
+  totalInvested: number
+  totalPayouts:  number
+  net:           number
+  returnPct:     number
+  winRate:       number
+  avgR:          number
+  profitFactor:  number
+  maxDrawdown:   number
+  tradeCount:    number
+}
+
+export interface BehavioralSignal {
+  id:       string
+  label:    string
+  value:    string
+  detail:   string
+  severity: 'ok' | 'warning' | 'critical'
+}
+
 export interface AccountPayout {
   date:   string
   amount: number
@@ -55,6 +99,15 @@ export interface Account {
   timelineEvents?: AccountTimelineEvent[] // manual timeline entries
   // Certificates (PDFs of passing/funding letters)
   certificates?:  AccountCertificate[]
+  // Extended behavioral context (Phase 1 expansion)
+  environment?:   AccountEnvironment
+  marketType?:    MarketType
+  tradingStyle?:  TradingStyle
+  riskModel?:     RiskModel
+  avgDuration?:   AvgDuration
+  strategies?:    string[]          // strategy tags allowed in this account
+  healthScore?:   number            // cached 0–100 score
+  personalityNote?: string          // generated personality observation
 }
 
 export interface AccountCertificate {
