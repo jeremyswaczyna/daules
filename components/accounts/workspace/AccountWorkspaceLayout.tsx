@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Settings, Edit2 } from 'lucide-react'
 import type { Account, Trade } from '@/types'
@@ -12,6 +12,7 @@ import AccountCard from '../AccountCard'
 import AccountForm from '../AccountForm'
 import { getAccounts } from '@/lib/firestore/accounts'
 import { calcHealthScore, healthScoreColor } from '@/lib/analytics/accountHealth'
+import { calcBehavioralSignals } from '@/lib/analytics/behavioralSignals'
 
 type Tab = 'overview' | 'trades' | 'strategies' | 'behavior' | 'settings'
 
@@ -52,8 +53,21 @@ export default function AccountWorkspaceLayout({ account, uid, onUpdated }: Prop
     setTrades([])
   }, [account.id])
 
-  const health = calcHealthScore(account, trades)
+  const health   = calcHealthScore(account, trades)
   const envLabel = account.environment ? (ENV_LABEL[account.environment] ?? account.environment) : account.type
+
+  // Contextual behavioral descriptor for header
+  const contextDesc = useMemo(() => {
+    if (trades.length < 3) return null
+    const signals = calcBehavioralSignals(account, trades)
+    const critical = signals.filter(s => s.severity === 'critical').length
+    const warning  = signals.filter(s => s.severity === 'warning').length
+    if (critical >= 2) return 'Emotionally volatile account.'
+    if (critical >= 1) return 'Recovery-driven trading.'
+    if (warning >= 2)  return 'Behavioral pressure building.'
+    if (warning === 0 && signals.length >= 3) return 'Highly disciplined environment.'
+    return 'Developing discipline.'
+  }, [account, trades])
 
   return (
     <div style={{ maxWidth: 860, animation: 'wsIn 0.28s ease both' }}>
@@ -112,6 +126,11 @@ export default function AccountWorkspaceLayout({ account, uid, onUpdated }: Prop
               {account.currency} {account.startingBalance?.toLocaleString()}
               {account.phase && ` · ${account.phase}`}
             </p>
+            {contextDesc && (
+              <p style={{ margin: '6px 0 0', fontSize: '0.6875rem', color: 'var(--fg-xdim)', letterSpacing: '-0.01em', fontStyle: 'italic' }}>
+                {contextDesc}
+              </p>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>

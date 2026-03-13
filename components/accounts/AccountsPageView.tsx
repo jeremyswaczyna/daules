@@ -10,6 +10,8 @@ import AccountForm from './AccountForm'
 import AccountComparison from './AccountComparison'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { deleteAccount } from '@/lib/firestore/accounts'
+import { calcBehaviorStabilityScore } from '@/lib/analytics/behavioralSignals'
+import { calcPortfolioInsights } from '@/lib/analytics/portfolioInsights'
 
 interface Props {
   accounts:         Account[]
@@ -31,14 +33,17 @@ const TYPE_BADGE = {
   personal:   { bg: 'var(--bg-sub)',    color: 'var(--fg-muted)', border: 'var(--border)'   },
 }
 
+// Empty trade map — trades not loaded at overview level
+const EMPTY_TRADE_MAP = new Map<string, import('@/types').Trade[]>()
+
 export default function AccountsPageView({ accounts, uid, onAccountsChange }: Props) {
-  const [showModal,      setShowModal]      = useState(false)
-  const [editing,        setEditing]        = useState<Account | null>(null)
-  const [deleteTarget,   setDeleteTarget]   = useState<string | null>(null)
-  const [deleting,       setDeleting]       = useState(false)
-  const [historyOpen,    setHistoryOpen]    = useState(true)
-  const [compareMode,    setCompareMode]    = useState(false)
-  const [viewMode,       setViewMode]       = useState<'grid' | 'list'>('grid')
+  const [showModal,    setShowModal]    = useState(false)
+  const [editing,      setEditing]      = useState<Account | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleting,     setDeleting]     = useState(false)
+  const [historyOpen,  setHistoryOpen]  = useState(true)
+  const [compareMode,  setCompareMode]  = useState(false)
+  const [viewMode,     setViewMode]     = useState<'compact' | 'insight'>('compact')
 
   const handleSave = (account: Account) => {
     const exists = accounts.find(a => a.id === account.id)
@@ -84,7 +89,28 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
   const bePercent  = totalInvested > 0 ? Math.min(100, (totalPayouts / totalInvested) * 100) : 0
   const houseMoney = totalInvested > 0 && totalPayouts >= totalInvested
 
+  // Confidence: payout consistency — how regularly payouts arrive
+  const confidencePercent = useMemo(() => {
+    const allPayouts = accounts.flatMap(a => a.payoutHistory ?? [])
+    if (allPayouts.length < 2) return 0
+    // Score based on count relative to accounts with payouts
+    const accsWithPayouts = accounts.filter(a => (a.payoutHistory ?? []).length > 0).length
+    const payoutsPerAcc   = allPayouts.length / Math.max(accsWithPayouts, 1)
+    return Math.min(100, payoutsPerAcc * 25)
+  }, [accounts])
+
+  // ── Behavior stability ───────────────────────────────────────────────────────
+  const behaviorStability = useMemo(() =>
+    calcBehaviorStabilityScore(active, EMPTY_TRADE_MAP), [active])
+
+  // ── Portfolio insights ───────────────────────────────────────────────────────
+  const portfolioInsights = useMemo(() =>
+    calcPortfolioInsights(accounts, EMPTY_TRADE_MAP), [accounts])
+
   // ── Broker exposure ──────────────────────────────────────────────────────────
+  const totalCapital = useMemo(() =>
+    active.reduce((s, a) => s + a.startingBalance, 0), [active])
+
   const brokerGroups = useMemo(() => {
     const map = new Map<string, { display: string; count: number; capital: number }>()
     for (const a of active) {
@@ -99,14 +125,20 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
     return [...map.values()].filter(g => g.count > 1)
   }, [active])
 
-  const beBarColor = houseMoney
-    ? 'linear-gradient(90deg, #4ade80, #86efac)'
-    : bePercent > 75 ? 'linear-gradient(90deg, #fbbf24, #4ade80)'
-    : bePercent > 40 ? '#fbbf24'
-    : 'var(--red)'
+  // ── Mood tint ────────────────────────────────────────────────────────────────
+  const moodGradient = useMemo(() => {
+    if (accounts.length === 0) return 'transparent'
+    if (houseMoney || net > 0) return 'radial-gradient(ellipse at 50% 0%, rgba(74,222,128,0.03) 0%, transparent 70%)'
+    const ddPct = active.reduce((sum, a) => {
+      if (!a.startingBalance) return sum
+      return sum + Math.max(0, (a.startingBalance - a.currentBalance) / a.startingBalance)
+    }, 0) / Math.max(active.length, 1)
+    if (ddPct > 0.05) return 'radial-gradient(ellipse at 50% 0%, rgba(239,68,68,0.03) 0%, transparent 70%)'
+    return 'transparent'
+  }, [accounts, houseMoney, net, active])
 
   return (
-    <div style={{ maxWidth: 860 }}>
+    <div style={{ maxWidth: 860, backgroundImage: moodGradient, borderRadius: 16, transition: 'background-image var(--dur-slow)' }}>
 
       {/* ── Page header ──────────────────────────────────────────── */}
       <div style={{
@@ -134,7 +166,6 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* View toggle */}
           {accounts.length > 0 && (
             <>
               <button
@@ -146,7 +177,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
                   color: compareMode ? 'var(--fg)' : 'var(--fg-muted)',
                   fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer',
                   fontFamily: 'inherit', letterSpacing: '-0.01em',
-                  transition: 'all 0.12s',
+                  transition: `all var(--dur-fast)`,
                 }}
               >
                 Compare
@@ -162,20 +193,19 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
       {accounts.length > 0 && (
         <div style={{
           background: 'var(--bg-card)',
-          border: `1px solid ${houseMoney ? 'rgba(74,222,128,0.22)' : 'var(--border)'}`,
+          border: `1px solid ${houseMoney ? 'var(--green-bd)' : 'var(--border)'}`,
           borderRadius: 14, overflow: 'hidden', marginBottom: 28,
-          boxShadow: houseMoney ? '0 0 0 1px rgba(74,222,128,0.06)' : 'none',
         }}>
 
-          {/* Stats strip */}
+          {/* Financial stats strip */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
             {[
-              { label: 'Total Invested', value: totalInvested > 0 ? `$${totalInvested.toLocaleString()}` : '—', color: '#fbbf24' },
-              { label: 'Total Payouts',  value: totalPayouts  > 0 ? `$${totalPayouts.toLocaleString()}`  : '—', color: '#4ade80' },
+              { label: 'Total Invested', value: totalInvested > 0 ? `$${totalInvested.toLocaleString()}` : '—', color: 'var(--amber)' },
+              { label: 'Total Payouts',  value: totalPayouts  > 0 ? `$${totalPayouts.toLocaleString()}`  : '—', color: 'var(--green)' },
               {
                 label: 'Net P&L',
                 value: totalInvested > 0 ? `${net >= 0 ? '+' : ''}$${net.toLocaleString()}` : '—',
-                color: net >= 0 ? '#4ade80' : 'var(--red)',
+                color: net >= 0 ? 'var(--green)' : 'var(--red)',
               },
               { label: 'Accounts', value: String(accounts.length), color: 'var(--fg-muted)' },
             ].map((s, i) => (
@@ -196,26 +226,68 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
             ))}
           </div>
 
-          {/* Break-even bar */}
+          {/* Behavior stability strip */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+            borderTop: '1px solid var(--border)',
+          }}>
+            <BehaviorStrip
+              label="Behavior Stability"
+              value={behaviorStability.score > 0 ? `${behaviorStability.score}` : '—'}
+              sub={behaviorStability.label}
+              color={
+                behaviorStability.score >= 80 ? 'var(--green)'
+                : behaviorStability.score >= 55 ? 'var(--amber)'
+                : 'var(--red)'
+              }
+              isLast={false}
+            />
+            <BehaviorStrip
+              label="Risk Consistency"
+              value={active.length > 0 ? `${active.filter(a => a.riskModel === 'fixed' || a.riskModel === 'percentage').length}/${active.length}` : '—'}
+              sub="fixed or % risk"
+              color="var(--fg-muted)"
+              isLast={false}
+            />
+            <BehaviorStrip
+              label="Avg Health"
+              value={active.filter(a => a.healthScore != null).length > 0
+                ? `${Math.round(active.filter(a => a.healthScore != null).reduce((s, a) => s + (a.healthScore ?? 0), 0) / active.filter(a => a.healthScore != null).length)}`
+                : '—'}
+              sub="across active accs"
+              color="var(--fg-muted)"
+              isLast
+            />
+          </div>
+
+          {/* Split break-even bar */}
           {totalInvested > 0 && (
-            <div style={{ padding: '12px 18px 16px', borderTop: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-                <span style={{
-                  fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.08em',
-                  textTransform: 'uppercase', color: 'var(--fg-xdim)',
-                }}>
-                  Portfolio break-even
-                </span>
+            <div style={{ padding: '12px 18px 14px', borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-xdim)' }}>
+                    Break-even
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: '0.5625rem', color: 'var(--fg-xdim)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 1, background: houseMoney ? 'var(--green)' : 'var(--amber)', display: 'inline-block' }} />
+                      Recovery {bePercent.toFixed(0)}%
+                    </span>
+                    <span style={{ fontSize: '0.5625rem', color: 'var(--fg-xdim)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 1, background: 'var(--fg-xdim)', display: 'inline-block' }} />
+                      Confidence {confidencePercent.toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: '0.6875rem', color: 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
-                    ${totalPayouts.toLocaleString()} of ${totalInvested.toLocaleString()} recovered
+                    ${totalPayouts.toLocaleString()} of ${totalInvested.toLocaleString()}
                   </span>
                   {houseMoney ? (
                     <span style={{
                       fontSize: '0.5625rem', fontWeight: 700, letterSpacing: '0.08em',
                       textTransform: 'uppercase', padding: '2px 8px', borderRadius: 99,
-                      background: 'rgba(74,222,128,0.12)', color: '#4ade80',
-                      border: '1px solid rgba(74,222,128,0.25)',
+                      background: 'var(--green-bg)', color: 'var(--green)', border: '1px solid var(--green-bd)',
                     }}>House Money</span>
                   ) : (
                     <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--fg-muted)' }}>
@@ -224,10 +296,25 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
                   )}
                 </div>
               </div>
-              <div style={{ height: 5, borderRadius: 99, background: 'var(--border)', overflow: 'hidden' }}>
+              {/* Double-layer bar */}
+              <div style={{ height: 5, borderRadius: 99, background: 'var(--border)', overflow: 'hidden', position: 'relative' }}>
+                {/* Confidence layer (underneath) */}
+                <div style={{
+                  position: 'absolute', inset: 0, borderRadius: 99,
+                  width: `${Math.min(confidencePercent, 100)}%`,
+                  background: 'rgba(255,255,255,0.06)',
+                  transition: 'width var(--dur-slow) var(--ease-out)',
+                }} />
+                {/* Recovery layer (on top) */}
                 <div style={{
                   height: '100%', borderRadius: 99, width: `${bePercent}%`,
-                  background: beBarColor, transition: 'width 0.8s cubic-bezier(0.4,0,0.2,1)',
+                  background: houseMoney
+                    ? 'var(--green)'
+                    : bePercent > 75 ? 'var(--amber)'
+                    : bePercent > 40 ? 'var(--amber)'
+                    : 'var(--red)',
+                  opacity: 0.7,
+                  transition: 'width var(--dur-slow) var(--ease-out)',
                 }} />
               </div>
             </div>
@@ -239,18 +326,35 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
               <span style={{ fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-xdim)', flexShrink: 0 }}>
                 Exposure
               </span>
-              {brokerGroups.map(g => (
-                <div key={g.display} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 99, background: 'var(--bg-sub)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--fg)', letterSpacing: '-0.01em' }}>{g.display}</span>
-                  <span style={{ fontSize: '0.6875rem', color: 'var(--fg-dim)' }}>×{g.count}</span>
-                  <span style={{ width: 1, height: 10, background: 'var(--border)', display: 'inline-block' }} />
-                  <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
-                    ${(g.capital / 1000).toFixed(0)}k
-                  </span>
-                </div>
-              ))}
+              {brokerGroups.map(g => {
+                const pct = totalCapital > 0 ? Math.round((g.capital / totalCapital) * 100) : 0
+                return (
+                  <BrokerChip key={g.display} display={g.display} count={g.count} capital={g.capital} pct={pct} />
+                )
+              })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Portfolio Observations ────────────────────────────────── */}
+      {portfolioInsights.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <SectionLabel text="Portfolio Observations" count={portfolioInsights.length} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {portfolioInsights.map(insight => (
+              <div key={insight.id} style={{
+                padding: '13px 16px', borderRadius: 10,
+                background: 'var(--bg-card)', border: '1px solid var(--border)',
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+              }}>
+                <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--fg-xdim)', marginTop: 5, flexShrink: 0 }} />
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)', lineHeight: 1.55, letterSpacing: '-0.01em' }}>
+                  {insight.text}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -271,7 +375,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
         <>
           <SectionLabel text="Active" count={active.length} />
 
-          {viewMode === 'grid' ? (
+          {viewMode === 'compact' ? (
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
@@ -311,7 +415,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
               display: 'flex', alignItems: 'center', gap: 8,
               background: 'transparent', border: 'none', cursor: 'pointer',
               borderBottom: historyOpen ? '1px solid var(--border)' : 'none',
-              transition: 'background 0.12s',
+              transition: `background var(--dur-fast)`,
             }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-sub)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
@@ -331,7 +435,7 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
           <div style={{
             overflow: 'hidden',
             maxHeight: historyOpen ? accounts.length * 64 + 8 : 0,
-            transition: 'max-height 0.30s cubic-bezier(0.4,0,0.2,1)',
+            transition: `max-height var(--dur-med) var(--ease-out)`,
           }}>
             {accounts.map((acc, i) => (
               <AccountHistoryRow
@@ -369,6 +473,75 @@ export default function AccountsPageView({ accounts, uid, onAccountsChange }: Pr
   )
 }
 
+// ── Behavior strip cell ───────────────────────────────────────────────────────
+function BehaviorStrip({ label, value, sub, color, isLast }: {
+  label: string; value: string; sub: string; color: string; isLast: boolean
+}) {
+  return (
+    <div style={{
+      padding: '11px 18px',
+      borderRight: isLast ? 'none' : '1px solid var(--border)',
+      background: 'rgba(255,255,255,0.015)',
+    }}>
+      <p style={{ margin: 0, fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-xdim)', marginBottom: 3 }}>
+        {label}
+      </p>
+      <p style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color, letterSpacing: '-0.04em' }}>
+        {value}
+      </p>
+      <p style={{ margin: '2px 0 0', fontSize: '0.5625rem', color: 'var(--fg-xdim)', letterSpacing: '-0.01em' }}>
+        {sub}
+      </p>
+    </div>
+  )
+}
+
+// ── Broker chip with hover insight ───────────────────────────────────────────
+function BrokerChip({ display, count, capital, pct }: {
+  display: string; count: number; capital: number; pct: number
+}) {
+  const [hov, setHov] = useState(false)
+
+  return (
+    <div style={{ position: 'relative' }} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+        borderRadius: 99, background: 'var(--bg-sub)', border: '1px solid var(--border)',
+        cursor: 'default',
+      }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--fg)', letterSpacing: '-0.01em' }}>{display}</span>
+        <span style={{ fontSize: '0.6875rem', color: 'var(--fg-dim)' }}>×{count}</span>
+        <span style={{ width: 1, height: 10, background: 'var(--border)', display: 'inline-block' }} />
+        <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
+          ${(capital / 1000).toFixed(0)}k
+        </span>
+      </div>
+
+      {/* Hover insight tooltip */}
+      {hov && (
+        <div style={{
+          position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 9, padding: '8px 12px', whiteSpace: 'nowrap',
+          boxShadow: 'var(--shadow-md)',
+          zIndex: 10, pointerEvents: 'none',
+          animation: 'wsIn 0.12s ease both',
+        }}>
+          <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg)', letterSpacing: '-0.01em', fontWeight: 500 }}>
+            {pct}% of capital depends on this firm.
+          </p>
+          {pct > 50 && (
+            <p style={{ margin: '3px 0 0', fontSize: '0.6875rem', color: 'var(--fg-muted)' }}>
+              Failure here would reduce portfolio capacity significantly.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Section label ─────────────────────────────────────────────────────────────
 function SectionLabel({ text, count }: { text: string; count: number }) {
   return (
@@ -382,17 +555,17 @@ function SectionLabel({ text, count }: { text: string; count: number }) {
   )
 }
 
-// ── View toggle ───────────────────────────────────────────────────────────────
-function ViewToggle({ mode, onChange }: { mode: 'grid' | 'list'; onChange: (m: 'grid' | 'list') => void }) {
+// ── View toggle (Compact / Insight) ──────────────────────────────────────────
+function ViewToggle({ mode, onChange }: { mode: 'compact' | 'insight'; onChange: (m: 'compact' | 'insight') => void }) {
   return (
     <div style={{ display: 'flex', background: 'var(--bg-sub)', borderRadius: 8, border: '1px solid var(--border)', padding: 2, gap: 2 }}>
-      {(['grid', 'list'] as const).map(m => (
+      {(['compact', 'insight'] as const).map(m => (
         <button key={m} onClick={() => onChange(m)} style={{
           padding: '5px 10px', borderRadius: 6, fontSize: '0.6875rem', fontWeight: 500,
           background: mode === m ? 'var(--bg-card)' : 'transparent',
           border: `1px solid ${mode === m ? 'var(--border)' : 'transparent'}`,
           color: mode === m ? 'var(--fg)' : 'var(--fg-muted)',
-          cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s',
+          cursor: 'pointer', fontFamily: 'inherit', transition: `all var(--dur-fast)`,
           letterSpacing: '-0.01em', textTransform: 'capitalize',
         }}>
           {m}
@@ -406,12 +579,12 @@ function ViewToggle({ mode, onChange }: { mode: 'grid' | 'list'; onChange: (m: '
 function AccountHistoryRow({ account, isLast, onEdit }: { account: Account; isLast: boolean; onEdit: () => void }) {
   const [hov, setHov] = useState(false)
 
-  const status      = (account.status ?? 'Active') as AccountStatus
-  const sBadge      = STATUS_BADGE[status] ?? STATUS_BADGE.Active
-  const tBadge      = TYPE_BADGE[account.type]
-  const invested    = calcTotalInvested(account)
-  const payouts     = (account.payoutHistory ?? []).reduce((s, p) => s + p.amount, 0)
-  const net         = payouts - invested
+  const status   = (account.status ?? 'Active') as AccountStatus
+  const sBadge   = STATUS_BADGE[status] ?? STATUS_BADGE.Active
+  const tBadge   = TYPE_BADGE[account.type]
+  const invested = calcTotalInvested(account)
+  const payouts  = (account.payoutHistory ?? []).reduce((s, p) => s + p.amount, 0)
+  const net      = payouts - invested
 
   const isFailed    = status === 'Failed'
   const isWithdrawn = status === 'Withdrawn'
@@ -420,7 +593,7 @@ function AccountHistoryRow({ account, isLast, onEdit }: { account: Account; isLa
   const rowOpacity    = isWithdrawn ? 0.55 : isFailed ? 0.78 : 1
   const netColor      = invested === 0 ? 'var(--fg-muted)'
     : isFailed && !netPositive ? 'var(--fg-xdim)'
-    : net >= 0 ? '#4ade80' : 'var(--red)'
+    : net >= 0 ? 'var(--green)' : 'var(--red)'
   const netDecoration = isFailed && netPositive ? 'line-through' as const : 'none' as const
 
   const opened  = account.openedAt ?? account.createdAt
@@ -439,7 +612,7 @@ function AccountHistoryRow({ account, isLast, onEdit }: { account: Account; isLa
         borderBottom: isLast ? 'none' : '1px solid var(--border)',
         background: hov ? 'var(--bg-sub)' : 'transparent',
         cursor: 'pointer',
-        transition: 'background 0.10s, opacity 0.15s',
+        transition: `background var(--dur-fast), opacity var(--dur-fast)`,
         opacity: rowOpacity,
       }}
     >
@@ -486,12 +659,12 @@ function AddAccountButton({ onClick }: { onClick: () => void }) {
         fontSize: '0.8125rem', fontWeight: 600,
         cursor: 'pointer', fontFamily: 'inherit',
         transform: pressed ? 'scale(0.96)' : 'scale(1)',
-        transition: 'background 0.18s, color 0.18s, transform 0.12s, box-shadow 0.18s',
-        boxShadow: hov ? '0 4px 16px rgba(0,0,0,0.15)' : '0 1px 4px rgba(0,0,0,0.06)',
+        transition: `background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast), box-shadow var(--dur-fast)`,
+        boxShadow: hov ? 'var(--shadow-md)' : 'var(--shadow-sm)',
         letterSpacing: '-0.02em',
       }}
     >
-      <Plus size={14} style={{ transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1)', transform: hov ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+      <Plus size={14} style={{ transition: `transform var(--dur-med) var(--ease-spring)`, transform: hov ? 'rotate(90deg)' : 'rotate(0deg)' }} />
       New Account
     </button>
   )
@@ -520,7 +693,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         </p>
       </div>
       <button onClick={onAdd} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 24px', borderRadius: 9999, background: hov ? 'var(--fg)' : 'var(--bg-sub)', border: '1px solid var(--border)', color: hov ? 'var(--bg)' : 'var(--fg)', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.18s, color 0.18s' }}>
+        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 24px', borderRadius: 9999, background: hov ? 'var(--fg)' : 'var(--bg-sub)', border: '1px solid var(--border)', color: hov ? 'var(--bg)' : 'var(--fg)', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: `background var(--dur-fast), color var(--dur-fast)` }}>
         <Plus size={15} />
         Add Account
       </button>

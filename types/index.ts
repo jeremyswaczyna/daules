@@ -17,6 +17,12 @@ export type RiskModel = 'fixed' | 'variable' | 'percentage' | 'discretionary'
 
 export type AvgDuration = 'minutes' | 'hours' | 'days' | 'weeks'
 
+export type AccountPurpose =
+  | 'income_generation'
+  | 'strategy_experimentation'
+  | 'evaluation_challenge'
+  | 'skill_development'
+
 export interface AccountHealthBreakdown {
   consistency:       number   // 0–100
   drawdownControl:   number   // 0–100
@@ -36,12 +42,15 @@ export interface AccountMetrics {
   tradeCount:    number
 }
 
+export type BehavioralTrend = 'improving' | 'declining' | 'stable'
+
 export interface BehavioralSignal {
   id:       string
   label:    string
   value:    string
   detail:   string
   severity: 'ok' | 'warning' | 'critical'
+  trend?:   BehavioralTrend
 }
 
 export interface AccountPayout {
@@ -108,6 +117,7 @@ export interface Account {
   strategies?:    string[]          // strategy tags allowed in this account
   healthScore?:   number            // cached 0–100 score
   personalityNote?: string          // generated personality observation
+  purpose?:       AccountPurpose    // what is this account for
 }
 
 export interface AccountCertificate {

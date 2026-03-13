@@ -9,11 +9,46 @@ interface Props {
 }
 
 const STATUS_COLOR: Record<AccountStatus, string> = {
-  Active:    '#4ade80',
-  Passed:    '#4ade80',
+  Active:    'var(--green)',
+  Passed:    'var(--green)',
   Failed:    'var(--red)',
-  Paused:    '#fbbf24',
+  Paused:    'var(--amber)',
   Withdrawn: 'var(--fg-xdim)',
+}
+
+function generateInsights(left: Account, right: Account): string[] {
+  const lm = getMetrics(left)
+  const rm = getMetrics(right)
+  const insights: string[] = []
+
+  // Recovery speed comparison
+  if (lm.invested > 0 && rm.invested > 0) {
+    const lBePerDay = left.payoutHistory && left.payoutHistory.length > 0
+      ? lm.payouts / Math.max(1, left.payoutHistory.length)
+      : 0
+    const rBePerDay = right.payoutHistory && right.payoutHistory.length > 0
+      ? rm.payouts / Math.max(1, right.payoutHistory.length)
+      : 0
+    if (lBePerDay > rBePerDay * 1.4 && lBePerDay > 0) {
+      insights.push(`${left.name} generates payouts faster on average.`)
+    } else if (rBePerDay > lBePerDay * 1.4 && rBePerDay > 0) {
+      insights.push(`${right.name} generates payouts faster on average.`)
+    }
+  }
+
+  // Drawdown discipline
+  if (Math.abs(lm.ddPct - rm.ddPct) > 2) {
+    const worse = lm.ddPct > rm.ddPct ? left.name : right.name
+    const diff  = Math.abs(lm.ddPct - rm.ddPct).toFixed(1)
+    insights.push(`${worse} carries ${diff}% more drawdown — something about that environment increases pressure.`)
+  }
+
+  // Risk model difference
+  if (left.riskModel && right.riskModel && left.riskModel !== right.riskModel) {
+    insights.push(`Different risk models: ${left.name} uses ${left.riskModel}, ${right.name} uses ${right.riskModel}. This changes how losses compound.`)
+  }
+
+  return insights.slice(0, 3)
 }
 
 function getMetrics(account: Account) {
@@ -36,23 +71,24 @@ export default function AccountComparison({ accounts }: Props) {
 
   if (!left || !right) return null
 
-  const lm = getMetrics(left)
-  const rm = getMetrics(right)
+  const lm       = getMetrics(left)
+  const rm       = getMetrics(right)
+  const insights = generateInsights(left, right)
 
   const rows: { label: string; l: string; r: string; lColor?: string; rColor?: string }[] = [
     {
       label: 'Net P&L',
       l: lm.invested > 0 ? `${lm.net >= 0 ? '+' : ''}$${lm.net.toLocaleString()}` : '—',
       r: rm.invested > 0 ? `${rm.net >= 0 ? '+' : ''}$${rm.net.toLocaleString()}` : '—',
-      lColor: lm.net >= 0 ? '#4ade80' : 'var(--red)',
-      rColor: rm.net >= 0 ? '#4ade80' : 'var(--red)',
+      lColor: lm.net >= 0 ? 'var(--green)' : 'var(--red)',
+      rColor: rm.net >= 0 ? 'var(--green)' : 'var(--red)',
     },
     {
       label: 'Return',
       l: lm.invested > 0 ? `${lm.returnPct >= 0 ? '+' : ''}${lm.returnPct.toFixed(1)}%` : '—',
       r: rm.invested > 0 ? `${rm.returnPct >= 0 ? '+' : ''}${rm.returnPct.toFixed(1)}%` : '—',
-      lColor: lm.returnPct >= 0 ? '#4ade80' : 'var(--red)',
-      rColor: rm.returnPct >= 0 ? '#4ade80' : 'var(--red)',
+      lColor: lm.returnPct >= 0 ? 'var(--green)' : 'var(--red)',
+      rColor: rm.returnPct >= 0 ? 'var(--green)' : 'var(--red)',
     },
     {
       label: 'Invested',
@@ -63,8 +99,8 @@ export default function AccountComparison({ accounts }: Props) {
       label: 'Payouts',
       l: lm.payouts > 0 ? `$${lm.payouts.toLocaleString()}` : '—',
       r: rm.payouts > 0 ? `$${rm.payouts.toLocaleString()}` : '—',
-      lColor: '#4ade80',
-      rColor: '#4ade80',
+      lColor: 'var(--green)',
+      rColor: 'var(--green)',
     },
     {
       label: 'Balance',
@@ -75,8 +111,8 @@ export default function AccountComparison({ accounts }: Props) {
       label: 'Drawdown',
       l: `${lm.ddPct.toFixed(1)}%`,
       r: `${rm.ddPct.toFixed(1)}%`,
-      lColor: lm.ddPct > 8 ? 'var(--red)' : lm.ddPct > 4 ? '#fbbf24' : 'var(--fg-muted)',
-      rColor: rm.ddPct > 8 ? 'var(--red)' : rm.ddPct > 4 ? '#fbbf24' : 'var(--fg-muted)',
+      lColor: lm.ddPct > 8 ? 'var(--red)' : lm.ddPct > 4 ? 'var(--amber)' : 'var(--fg-muted)',
+      rColor: rm.ddPct > 8 ? 'var(--red)' : rm.ddPct > 4 ? 'var(--amber)' : 'var(--fg-muted)',
     },
     {
       label: 'Market',
@@ -137,6 +173,21 @@ export default function AccountComparison({ accounts }: Props) {
           </span>
         </div>
       ))}
+
+      {/* Insight sentences */}
+      {insights.length > 0 && (
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p style={{ margin: '0 0 6px', fontSize: '0.5625rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-xdim)' }}>
+            Insights
+          </p>
+          {insights.map((ins, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+              <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--fg-xdim)', marginTop: 6, flexShrink: 0 }} />
+              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg-muted)', lineHeight: 1.5, letterSpacing: '-0.01em' }}>{ins}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

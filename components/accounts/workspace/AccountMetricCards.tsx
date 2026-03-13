@@ -66,11 +66,57 @@ function calcMetrics(account: Account, trades: Trade[]): Metric[] {
     },
     {
       label: 'Health Score',
-      value: health ? `${health.score}` : trades.length < 5 ? '—' : '—',
+      value: health ? `${health.score}` : '—',
       sub:   health ? health.label : trades.length < 5 ? 'Need 5+ trades' : undefined,
       color: health ? healthScoreColor(health.score) : 'var(--fg-muted)',
     },
+    calcRecoveryTime(account, trades),
   ]
+}
+
+function calcRecoveryTime(account: Account, trades: Trade[]): Metric {
+  if (trades.length < 5) {
+    return { label: 'Recovery Time', value: '—', sub: 'Need 5+ trades', color: 'var(--fg-muted)' }
+  }
+
+  const sorted = [...trades].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  // Find drawdown periods and measure days to recover
+  let peak = account.startingBalance ?? 0
+  let inDrawdown = false
+  let drawdownStart: Date | null = null
+  const recoveryDays: number[] = []
+  let running = peak
+
+  for (const t of sorted) {
+    running += t.pnl ?? 0
+    if (running > peak) {
+      if (inDrawdown && drawdownStart) {
+        const days = (new Date(t.date).getTime() - drawdownStart.getTime()) / 86_400_000
+        if (days > 0) recoveryDays.push(days)
+      }
+      peak = running
+      inDrawdown = false
+      drawdownStart = null
+    } else if (!inDrawdown && running < peak * 0.99) {
+      inDrawdown = true
+      drawdownStart = new Date(t.date)
+    }
+  }
+
+  if (recoveryDays.length === 0) {
+    return { label: 'Recovery Time', value: '—', sub: 'No recovered drawdowns yet', color: 'var(--fg-muted)' }
+  }
+
+  const avg = Math.round(recoveryDays.reduce((s, d) => s + d, 0) / recoveryDays.length)
+  const color = avg <= 3 ? 'var(--green)' : avg <= 10 ? 'var(--amber)' : 'var(--red)'
+
+  return {
+    label: 'Recovery Time',
+    value: `${avg}d`,
+    sub:   `avg days to recover from drawdown`,
+    color,
+  }
 }
 
 // Count-up animation hook

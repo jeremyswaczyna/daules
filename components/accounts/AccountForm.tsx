@@ -8,7 +8,7 @@ import DaulesLogo from '@/components/ui/DaulesLogo'
 import ParticleCanvas from '@/components/ParticleCanvas'
 import type {
   Account, AccountType,
-  AccountEnvironment, MarketType, TradingStyle, RiskModel, AvgDuration,
+  AccountEnvironment, MarketType, TradingStyle, RiskModel, AvgDuration, AccountPurpose,
 } from '@/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -78,6 +78,13 @@ const TYPE_COLORS: Record<AccountType, { bg: string; color: string; border: stri
 
 const TOTAL_STEPS = 5
 
+const PURPOSES: { value: AccountPurpose; label: string; desc: string }[] = [
+  { value: 'income_generation',      label: 'Income',       desc: 'Consistent profitability'        },
+  { value: 'strategy_experimentation', label: 'Experiment', desc: 'Testing setups and ideas'        },
+  { value: 'evaluation_challenge',   label: 'Challenge',    desc: 'Pass a funded evaluation'        },
+  { value: 'skill_development',      label: 'Skill',        desc: 'Building edge and discipline'    },
+]
+
 // ── FormData ──────────────────────────────────────────────────────────────────
 
 interface FormData {
@@ -111,6 +118,8 @@ interface FormData {
   strategyInput:    string
   // Notes (available in edit mode)
   notes:            string
+  // Purpose question (Quick Create)
+  purpose:          AccountPurpose | ''
 }
 
 interface Props {
@@ -179,8 +188,10 @@ export default function AccountForm({ account, uid, onSave, onClose }: Props) {
     strategies:       account?.strategies                  ?? [],
     strategyInput:    '',
     notes:            account?.notes                       ?? '',
+    purpose:          account?.purpose                     ?? '',
   })
 
+  const [quickCreate, setQuickCreate] = useState(!isEdit)
   const [saving,     setSaving]     = useState(false)
   const [saveMsgIdx, setSaveMsgIdx] = useState(0)
   const [error,      setError]      = useState('')
@@ -264,6 +275,7 @@ export default function AccountForm({ account, uid, onSave, onClose }: Props) {
         ...(form.totalPaid   ? { totalPaid:   parseFloat(form.totalPaid)   }                  : {}),
         ...(form.payoutSplit ? { payoutSplit: parseFloat(form.payoutSplit) }                  : {}),
         ...(form.notes.trim() ? { notes: form.notes.trim() }                                  : {}),
+        ...(form.purpose      ? { purpose: form.purpose as AccountPurpose }                   : {}),
         ...(account?.payoutHistory   ? { payoutHistory:   account.payoutHistory   }           : {}),
         ...(account?.timelineEvents  ? { timelineEvents:  account.timelineEvents  }           : {}),
         ...(account?.certificates    ? { certificates:    account.certificates    }           : {}),
@@ -802,6 +814,113 @@ export default function AccountForm({ account, uid, onSave, onClose }: Props) {
     )
   }
 
+  // ── Quick Create mode ─────────────────────────────────────────────────────────
+
+  const renderQuickCreate = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, animation: 'afStepIn 0.22s ease both' }}>
+      <div>
+        <h3 style={{ margin: '0 0 3px', fontSize: '1.0625rem', fontWeight: 600, letterSpacing: '-0.03em', color: 'var(--fg)' }}>
+          Quick Setup
+        </h3>
+        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+          The essentials only. You can fill in the rest later.
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <label style={fieldLabel}>Account Name</label>
+          <input className="af-inp" type="text" value={form.name}
+            onChange={e => { prevAutoName.current = e.target.value; set('name', e.target.value) }}
+            placeholder="e.g. FTMO Phase 1"
+            style={inp}
+          />
+        </div>
+
+        <div ref={brokerRef} style={{ position: 'relative' }}>
+          <label style={fieldLabel}>Prop Firm / Broker</label>
+          <div style={{ position: 'relative' }}>
+            <input className="af-inp" type="text" value={form.broker}
+              onChange={e => { set('broker', e.target.value); setBrokerOpen(true) }}
+              onFocus={() => setBrokerOpen(true)}
+              placeholder="FTMO, Topstep…"
+              style={{ ...inp, paddingRight: 30 }}
+            />
+            <ChevronDown size={12} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-dim)', pointerEvents: 'none' }} />
+          </div>
+          {brokerOpen && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: 'var(--bg-card)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, marginTop: 3, boxShadow: '0 10px 40px rgba(0,0,0,0.45)', maxHeight: 160, overflowY: 'auto' }}>
+              {BROKERS.filter(b => !form.broker || b.toLowerCase().includes(form.broker.toLowerCase())).map(b => (
+                <button key={b} onClick={() => { set('broker', b === 'Other' ? '' : b); setBrokerOpen(false) }}
+                  style={{ width: '100%', textAlign: 'left', padding: '8px 13px', background: 'transparent', border: 'none', color: form.broker === b ? 'var(--fg)' : 'var(--fg-muted)', fontSize: '0.8125rem', cursor: 'pointer', fontFamily: 'inherit', fontWeight: form.broker === b ? 500 : 400 }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-sub)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+                  {b}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div>
+            <label style={fieldLabel}>Starting Balance</label>
+            <input className="af-inp" type="number" value={form.startingBalance}
+              onChange={e => set('startingBalance', e.target.value)}
+              placeholder="10000" style={inp}
+            />
+          </div>
+          <div>
+            <label style={fieldLabel}>Account Type</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {(['evaluation', 'funded', 'personal'] as AccountType[]).map(t => (
+                <button key={t} type="button" className="af-btn-press" onClick={() => set('type', t)}
+                  style={{
+                    padding: '6px 10px', borderRadius: 7, fontSize: '0.75rem',
+                    textTransform: 'capitalize', cursor: 'pointer', fontFamily: 'inherit',
+                    background: form.type === t ? TYPE_COLORS[t].bg : 'transparent',
+                    border: `1px solid ${form.type === t ? TYPE_COLORS[t].border : 'rgba(255,255,255,0.09)'}`,
+                    color: form.type === t ? TYPE_COLORS[t].color : 'var(--fg-muted)',
+                    fontWeight: form.type === t ? 600 : 400, transition: 'all 0.12s',
+                    textAlign: 'left',
+                  }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Purpose question */}
+      <div>
+        <p style={{ margin: '0 0 8px', fontSize: '0.75rem', color: 'var(--fg-muted)', letterSpacing: '-0.01em', fontStyle: 'italic' }}>
+          What is this account for?
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+          {PURPOSES.map(p => (
+            <button key={p.value} type="button" className="af-btn-press"
+              onClick={() => set('purpose', p.value)}
+              style={{
+                padding: '10px 12px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit',
+                background: form.purpose === p.value ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: `1px solid ${form.purpose === p.value ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.08)'}`,
+                textAlign: 'left', transition: 'all 0.12s',
+              }}
+            >
+              <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600, color: form.purpose === p.value ? 'var(--fg)' : 'var(--fg-muted)', letterSpacing: '-0.01em' }}>
+                {p.label}
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: '0.6875rem', color: 'var(--fg-xdim)' }}>{p.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <p style={{ fontSize: '0.75rem', color: 'var(--red)', margin: 0 }}>{error}</p>}
+    </div>
+  )
+
   // ── Edit mode: single-page form ──────────────────────────────────────────────
 
   const renderEditForm = () => (
@@ -1029,10 +1148,37 @@ export default function AccountForm({ account, uid, onSave, onClose }: Props) {
           </div>
         </div>
 
+        {/* Mode toggle (create mode only) */}
+        {!isEdit && (
+          <div style={{ padding: '8px 24px 0', display: 'flex', gap: 6 }}>
+            {([
+              { key: 'quick', label: 'Quick' },
+              { key: 'full',  label: 'Full'  },
+            ] as const).map(m => (
+              <button
+                key={m.key}
+                onClick={() => { setQuickCreate(m.key === 'quick'); if (m.key === 'full') setStep(1) }}
+                style={{
+                  padding: '4px 12px', borderRadius: 99, fontSize: '0.6875rem', fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '-0.01em',
+                  background: (m.key === 'quick') === quickCreate ? 'rgba(255,255,255,0.10)' : 'transparent',
+                  border: `1px solid ${(m.key === 'quick') === quickCreate ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.08)'}`,
+                  color: (m.key === 'quick') === quickCreate ? 'var(--fg)' : 'var(--fg-muted)',
+                  transition: 'all 0.12s',
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Scrollable body */}
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px 24px', scrollbarWidth: 'thin', scrollbarColor: 'var(--border) transparent' }}>
           {isEdit
             ? renderEditForm()
+            : quickCreate
+            ? renderQuickCreate()
             : step === 1 ? renderStep1()
             : step === 2 ? renderStep2()
             : step === 3 ? renderStep3()
@@ -1052,6 +1198,17 @@ export default function AccountForm({ account, uid, onSave, onClose }: Props) {
               <button onClick={handleSave} className="af-btn-press" disabled={saving}
                 style={{ flex: 2, padding: '10px 0', borderRadius: 9999, background: 'var(--fg)', border: 'none', color: 'var(--bg)', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '0.8125rem', fontWeight: 600, fontFamily: 'inherit', opacity: saving ? 0.7 : 1, letterSpacing: '-0.02em', transition: 'opacity 0.12s' }}>
                 Update Account
+              </button>
+            </>
+          ) : quickCreate ? (
+            <>
+              <button onClick={handleClose} className="af-btn-press"
+                style={{ flex: 1, padding: '10px 0', borderRadius: 9, background: 'transparent', border: '1px solid rgba(255,255,255,0.10)', color: 'var(--fg-muted)', cursor: 'pointer', fontSize: '0.8125rem', fontFamily: 'inherit', letterSpacing: '-0.01em', transition: 'border-color 0.12s, color 0.12s' }}>
+                Cancel
+              </button>
+              <button onClick={handleSave} className="af-btn-press" disabled={saving}
+                style={{ flex: 2, padding: '10px 0', borderRadius: 9999, background: 'var(--fg)', border: 'none', color: 'var(--bg)', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '0.8125rem', fontWeight: 600, fontFamily: 'inherit', opacity: saving ? 0.7 : 1, letterSpacing: '-0.02em', transition: 'opacity 0.12s' }}>
+                Create Account
               </button>
             </>
           ) : (

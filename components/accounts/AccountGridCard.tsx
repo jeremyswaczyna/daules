@@ -9,16 +9,16 @@ import { healthScoreColor } from '@/lib/analytics/accountHealth'
 import type { Account, AccountStatus, BehavioralSignal } from '@/types'
 
 interface Props {
-  account: Account
-  signal?: BehavioralSignal | null
+  account:     Account
+  signal?:     BehavioralSignal | null
   healthScore?: number | null
 }
 
 const STATUS_COLOR: Record<AccountStatus, string> = {
-  Active:    '#4ade80',
-  Passed:    '#4ade80',
+  Active:    'var(--green)',
+  Passed:    'var(--green)',
   Failed:    'var(--red)',
-  Paused:    '#fbbf24',
+  Paused:    'var(--amber)',
   Withdrawn: 'var(--fg-xdim)',
 }
 
@@ -31,9 +31,43 @@ const ENV_LABEL: Record<string, string> = {
   institutional:    'Inst.',
 }
 
+// Short environmental context sentences
+const ENV_CONTEXT: Record<string, string> = {
+  live:             'Emotional pressure highest here.',
+  demo:             'Risk-free — behavior often relaxes.',
+  prop_firm:        'Strict drawdown rules shape discipline.',
+  strategy_testing: 'Behavior becomes experimental here.',
+  development:      'Low-stakes environment for building edge.',
+  institutional:    'Performance standards tend to be strict.',
+}
+
+// Derive a dominant behavioral narrative from account data
+function dominantNarrative(account: Account): string | null {
+  if (!account.payoutHistory || account.payoutHistory.length === 0) return null
+
+  const payouts = [...account.payoutHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  const invested = calcTotalInvested(account)
+  const totalPayout = payouts.reduce((s, p) => s + p.amount, 0)
+
+  // Check if behavior changed after first payout
+  if (payouts.length >= 2) {
+    const firstPayout  = payouts[0].amount
+    const laterPayouts = payouts.slice(1).reduce((s, p) => s + p.amount, 0) / (payouts.length - 1)
+    if (laterPayouts > firstPayout * 1.4) return 'Payout size growing over time.'
+    if (laterPayouts < firstPayout * 0.6) return 'Payout consistency declining.'
+  }
+
+  if (totalPayout >= invested * 1.5) return 'Well beyond break-even — house money territory.'
+  if (totalPayout > 0 && totalPayout < invested * 0.3) return 'Early recovery phase.'
+  if (account.evaluation && account.currentBalance < account.startingBalance) return 'Under pressure from drawdown.'
+
+  return null
+}
+
 export default function AccountGridCard({ account, signal, healthScore }: Props) {
-  const router  = useRouter()
-  const [hov,   setHov]   = useState(false)
+  const router          = useRouter()
+  const [hov, setHov]   = useState(false)
+  const [sparkMode, setSparkMode] = useState<'balance' | 'freq'>('balance')
 
   const status      = (account.status ?? 'Active') as AccountStatus
   const statusColor = STATUS_COLOR[status] ?? 'var(--fg-muted)'
@@ -45,7 +79,7 @@ export default function AccountGridCard({ account, signal, healthScore }: Props)
   const returnPct = invested > 0 ? ((net / invested) * 100) : 0
 
   // Balance sparkline: use payout history as proxy equity points
-  const sparkData: number[] = (() => {
+  const balanceSparkData: number[] = (() => {
     const base   = account.startingBalance ?? 0
     const events = [...(account.payoutHistory ?? [])].sort((a, b) =>
       new Date(a.date).getTime() - new Date(b.date).getTime()
@@ -61,10 +95,23 @@ export default function AccountGridCard({ account, signal, healthScore }: Props)
     return pts
   })()
 
-  const envLabel = account.environment ? (ENV_LABEL[account.environment] ?? account.environment) : account.type
+  // Trade frequency sparkline: placeholder data (even distribution over 7 pts)
+  const freqSparkData: number[] = (() => {
+    const len = Math.max(balanceSparkData.length, 4)
+    return Array.from({ length: len }, (_, i) => Math.sin(i * 0.8) * 0.5 + 1)
+  })()
 
-  const hsBg     = healthScore != null ? `${healthScoreColor(healthScore)}18` : 'var(--bg-sub)'
-  const hsColor  = healthScore != null ? healthScoreColor(healthScore) : 'var(--fg-muted)'
+  const sparkData = sparkMode === 'balance' ? balanceSparkData : freqSparkData
+
+  const envLabel   = account.environment ? (ENV_LABEL[account.environment] ?? account.environment) : account.type
+  const envContext = account.environment ? (ENV_CONTEXT[account.environment] ?? null) : null
+  const narrative  = dominantNarrative(account)
+
+  const hsBg    = healthScore != null ? `${healthScoreColor(healthScore)}18` : 'var(--bg-sub)'
+  const hsColor = healthScore != null ? healthScoreColor(healthScore) : 'var(--fg-muted)'
+
+  // Certificate badge
+  const hasCerts = (account.certificates ?? []).length > 0
 
   return (
     <div
@@ -77,14 +124,25 @@ export default function AccountGridCard({ account, signal, healthScore }: Props)
         borderRadius: 14,
         padding: '18px 20px 16px',
         cursor: 'pointer',
-        transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
+        transition: `border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast)`,
         transform: hov ? 'translateY(-2px)' : 'translateY(0)',
-        boxShadow: hov
-          ? '0 8px 32px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.1)'
-          : '0 1px 4px rgba(0,0,0,0.06)',
+        boxShadow: hov ? 'var(--shadow-md)' : 'var(--shadow-sm)',
         display: 'flex', flexDirection: 'column', gap: 14,
+        position: 'relative',
       }}
     >
+      {/* Certificate badge */}
+      {hasCerts && (
+        <div style={{
+          position: 'absolute', top: 12, right: 50,
+          width: 7, height: 7, borderRadius: '50%',
+          background: 'var(--amber)',
+          boxShadow: '0 0 6px var(--amber-bg)',
+        }}
+          title="Proof of passing stored"
+        />
+      )}
+
       {/* ── Top row: name + health + arrow ───────────────────── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -138,23 +196,52 @@ export default function AccountGridCard({ account, signal, healthScore }: Props)
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: hov ? 'rgba(255,255,255,0.08)' : 'transparent',
           border: `1px solid ${hov ? 'rgba(255,255,255,0.14)' : 'transparent'}`,
-          transition: 'all 0.15s',
+          transition: `all var(--dur-fast)`,
         }}>
-          <ArrowUpRight size={13} style={{ color: hov ? 'var(--fg)' : 'var(--fg-dim)', transition: 'color 0.15s' }} />
+          <ArrowUpRight size={13} style={{ color: hov ? 'var(--fg)' : 'var(--fg-dim)', transition: `color var(--dur-fast)` }} />
         </div>
       </div>
 
-      {/* ── Sparkline ────────────────────────────────────────── */}
-      <div style={{ height: 36 }}>
+      {/* ── Sparkline with mode toggle ───────────────────────── */}
+      <div style={{ position: 'relative', height: 36 }}>
         <AccountSparkline data={sparkData} width={220} height={36} />
+        {/* Mode toggle — only visible on hover */}
+        {hov && (
+          <div
+            onClick={e => { e.stopPropagation(); setSparkMode(m => m === 'balance' ? 'freq' : 'balance') }}
+            style={{
+              position: 'absolute', top: 0, right: 0,
+              fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.06em',
+              textTransform: 'uppercase', color: 'var(--fg-xdim)',
+              padding: '2px 6px', borderRadius: 5,
+              background: 'var(--bg-sub)', border: '1px solid var(--border)',
+              cursor: 'pointer', zIndex: 1,
+              transition: `opacity var(--dur-fast)`,
+            }}
+          >
+            {sparkMode === 'balance' ? 'Freq' : 'Balance'}
+          </div>
+        )}
       </div>
 
       {/* ── Metrics row ──────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-        <Stat label="Net" value={invested > 0 ? `${net >= 0 ? '+' : ''}$${Math.abs(net).toLocaleString()}` : '—'} color={invested > 0 ? (isPos ? '#4ade80' : 'var(--red)') : 'var(--fg-muted)'} />
-        <Stat label="Return" value={invested > 0 ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%` : '—'} color={invested > 0 ? (returnPct >= 0 ? '#4ade80' : 'var(--red)') : 'var(--fg-muted)'} />
+        <Stat label="Net"     value={invested > 0 ? `${net >= 0 ? '+' : ''}$${Math.abs(net).toLocaleString()}` : '—'} color={invested > 0 ? (isPos ? 'var(--green)' : 'var(--red)') : 'var(--fg-muted)'} />
+        <Stat label="Return"  value={invested > 0 ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%` : '—'}       color={invested > 0 ? (returnPct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--fg-muted)'} />
         <Stat label="Balance" value={account.currentBalance > 0 ? `$${account.currentBalance.toLocaleString()}` : '—'} color="var(--fg)" />
       </div>
+
+      {/* ── Environment context or behavioral narrative ───────── */}
+      {(narrative || envContext) && (
+        <p style={{
+          margin: 0, fontSize: '0.6875rem', color: 'var(--fg-xdim)',
+          letterSpacing: '-0.01em', lineHeight: 1.45,
+          borderTop: '1px solid var(--border)', paddingTop: 10,
+          marginTop: -4,
+        }}>
+          {narrative ?? envContext}
+        </p>
+      )}
 
       {/* ── Behavioral signal footer ──────────────────────────── */}
       {signal && (
@@ -162,20 +249,20 @@ export default function AccountGridCard({ account, signal, healthScore }: Props)
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '6px 10px', borderRadius: 8,
           background: signal.severity === 'ok'
-            ? 'rgba(74,222,128,0.06)'
+            ? 'var(--green-bg)'
             : signal.severity === 'warning'
-            ? 'rgba(251,191,36,0.06)'
-            : 'rgba(239,68,68,0.06)',
+            ? 'var(--amber-bg)'
+            : 'var(--red-bg)',
           border: `1px solid ${
-            signal.severity === 'ok'      ? 'rgba(74,222,128,0.14)' :
-            signal.severity === 'warning' ? 'rgba(251,191,36,0.14)' :
-            'rgba(239,68,68,0.14)'
+            signal.severity === 'ok'      ? 'var(--green-bd)' :
+            signal.severity === 'warning' ? 'var(--amber-bd)' :
+            'var(--red-bd)'
           }`,
           marginTop: -2,
         }}>
           {signal.severity === 'ok'
-            ? <TrendingUp  size={10} style={{ color: '#4ade80', flexShrink: 0 }} />
-            : <TrendingDown size={10} style={{ color: signal.severity === 'critical' ? 'var(--red)' : '#fbbf24', flexShrink: 0 }} />
+            ? <TrendingUp  size={10} style={{ color: 'var(--green)', flexShrink: 0 }} />
+            : <TrendingDown size={10} style={{ color: signal.severity === 'critical' ? 'var(--red)' : 'var(--amber)', flexShrink: 0 }} />
           }
           <span style={{
             fontSize: '0.6875rem', color: 'var(--fg-muted)',

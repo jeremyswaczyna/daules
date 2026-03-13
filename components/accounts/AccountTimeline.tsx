@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { parseISO, format } from 'date-fns'
 import { Award, DollarSign, Calendar, Plus, X, Zap, Star, Circle, Check } from 'lucide-react'
-import type { Account, AccountTimelineEvent, TimelineEventType } from '@/types'
+import type { Account, AccountTimelineEvent, TimelineEventType, Trade } from '@/types'
 import { updateAccount } from '@/lib/firestore/accounts'
 
 // ── Event type catalogue ─────────────────────────────────────────────────────
@@ -76,6 +76,7 @@ interface DisplayEvent {
 
 interface Props {
   account:   Account
+  trades?:   Trade[]
   onUpdated: (account: Account) => void
 }
 
@@ -86,7 +87,7 @@ const STATUS_FOR_EVENT: Partial<Record<TimelineEventType, Account['status']>> = 
   funded:        'Active',   // funded = still active (promoted)
 }
 
-export default function AccountTimeline({ account, onUpdated }: Props) {
+export default function AccountTimeline({ account, trades = [], onUpdated }: Props) {
   const today = new Date().toISOString().split('T')[0]
 
   // ── Add-event state machine ──────────────────────────────────────────────
@@ -122,6 +123,56 @@ export default function AccountTimeline({ account, onUpdated }: Props) {
         note: ev.note,
         id: ev.id,
       })
+    }
+
+    // Auto-generated trade milestone events (non-deletable, from trades prop)
+    if (trades.length > 0) {
+      const sorted = [...trades].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+      // First payout from payoutHistory
+      const firstPayout = (account.payoutHistory ?? []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0]
+      if (firstPayout) {
+        const alreadyInTimeline = (account.timelineEvents ?? []).some(e => e.type === 'payout' && e.date.split('T')[0] === firstPayout.date.split('T')[0])
+        if (!alreadyInTimeline) {
+          list.push({
+            key: '__auto_first_payout',
+            date: parseISO(firstPayout.date),
+            type: 'payout',
+            label: 'First payout',
+            amount: firstPayout.amount,
+          })
+        }
+      }
+
+      // Largest win
+      const biggestWin = sorted.reduce<Trade | null>((best, t) =>
+        (t.pnl ?? 0) > (best?.pnl ?? 0) ? t : best, null)
+      if (biggestWin && (biggestWin.pnl ?? 0) > 0) {
+        try {
+          list.push({
+            key: '__auto_biggest_win',
+            date: parseISO(biggestWin.date.split('T')[0]),
+            type: 'milestone',
+            label: `Largest win`,
+            amount: biggestWin.pnl ?? 0,
+          })
+        } catch { /* skip bad date */ }
+      }
+
+      // Largest loss
+      const biggestLoss = sorted.reduce<Trade | null>((worst, t) =>
+        (t.pnl ?? 0) < (worst?.pnl ?? 0) ? t : worst, null)
+      if (biggestLoss && (biggestLoss.pnl ?? 0) < 0) {
+        try {
+          list.push({
+            key: '__auto_biggest_loss',
+            date: parseISO(biggestLoss.date.split('T')[0]),
+            type: 'custom',
+            label: `Largest loss`,
+            amount: biggestLoss.pnl ?? 0,
+          })
+        } catch { /* skip bad date */ }
+      }
     }
 
     // Legacy payout history (if not already tracked in timelineEvents)
@@ -263,8 +314,8 @@ export default function AccountTimeline({ account, onUpdated }: Props) {
                     {ev.label}
                   </span>
                   {ev.amount != null && (
-                    <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#4ade80' }}>
-                      +${ev.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: ev.amount >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {ev.amount >= 0 ? '+' : ''}${Math.abs(ev.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   )}
                 </div>
